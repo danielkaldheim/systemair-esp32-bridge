@@ -13,29 +13,37 @@ The PCB-board is inspired by [Crudus Sense](https://kaldheim.org/projects/crudus
 
 ## Home assistant
 
+Enable [MQTT Discovery](https://www.home-assistant.io/docs/mqtt/discovery/).
+
 MQTT configuration for [Climate HVAC](https://www.home-assistant.io/integrations/climate.mqtt/).
 
-configuration.yaml:
+`configuration.yaml`:
 
 ```yaml
+mqtt:
+  discovery: true
+  discovery_prefix: homeassistant
+
 climate:
-    - platform: mqtt
+  - platform: mqtt
     name: VR400
     unique_id: "SystemAir-68E6"
     modes:
-        - "off"
-        - "heat"
-        - "fan_only"
+      - "off"
+      - "heat"
+      - "fan_only"
     mode_command_topic: systemair/68E6/mode/set
     mode_state_topic: systemair/68E6/mode/state
     fan_modes:
-        - "off"
-        - "low"
-        - "medium"
-        - "high"
+      - "off"
+      - "low"
+      - "medium"
+      - "high"
     fan_mode_state_topic: systemair/68E6/fan/state
     fan_mode_command_topic: systemair/68E6/fan/set
     current_temperature_template: "{{ value_json.extract }}"
     temperature_command_topic: systemair/68E6/temperature/set
     current_temperature_topic: systemair/68E6/temperature/state
 ```
+
+Project notes: [Kaldheim.org - system air](https://kaldheim.org/projects/systemair)

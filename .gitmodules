@@ -1,4 +1,4 @@
 [submodule "lib/sense"]
 	path = lib/sense
-	url = git@gitlab.crudus.no:arduino/sense-library.git
+	url = https://github.com/danielkaldheim/sense-library.git
 	branch = "master"
