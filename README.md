@@ -13,6 +13,8 @@ The PCB-board is inspired by [Crudus Sense](https://kaldheim.org/projects/crudus
 
 ## Home assistant
 
+MQTT configuration for [Climate HVAC](https://www.home-assistant.io/integrations/climate.mqtt/).
+
 configuration.yaml:
 
 ```yaml
