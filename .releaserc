@@ -1,0 +1,21 @@
+{
+  "plugins": [
+    "@semantic-release/commit-analyzer",
+    "@semantic-release/release-notes-generator",
+    "@semantic-release/changelog",
+    [
+      "@semantic-release/exec",
+      {
+        "prepareCmd": "sed -i \"s/VERSION=.*/VERSION=sense-${nextRelease.version}/g\" platformio-example.ini"
+      }
+    ],
+    [
+      "@semantic-release/git",
+      {
+        "assets": ["platformio-example.ini", "CHANGELOG.md"],
+        "message": "chore(release): ${nextRelease.version}\n\n${nextRelease.notes}"
+      }
+    ],
+    "@semantic-release/gitlab"
+  ]
+}

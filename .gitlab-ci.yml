@@ -15,29 +15,42 @@ variables:
   # When using dind, it's wise to use the overlayfs driver for
   # improved performance.
   DOCKER_DRIVER: overlay2
+  GITLAB_URL: $CI_SERVER_URL
 
 services:
   - docker:dind
 
-build:
-  stage: build
-  image: registry.crudus.no/crudus-devices/platformio:latest
+stages:
+  - prepare
+  - build
+  - deploy
+
+semantic-release:
+  stage: prepare
+  image: registry.crudus.no/docker/semantic-release-gitlab:latest
   script:
-    - platformio run
-    - upload .pioenvs/featheresp32/firmware.bin $CI_PROJECT_PATH/featheresp32 firmware.bin
+    - semantic-release
   only:
     - master
+# build:
+#   stage: build
+#   image: registry.crudus.no/crudus-devices/platformio:latest
+#   script:
+#     - platformio run
+#     - upload .pioenvs/featheresp32/firmware.bin $CI_PROJECT_PATH/featheresp32 firmware.bin
+#   only:
+#     - master
 
-build_tag:
-  stage: build
-  image: registry.crudus.no/crudus-devices/platformio:latest
-  script:
-    - platformio run
-    - |
-      if [ ! -z "$device_id" ]; then
-      upload .pioenvs/featheresp32/firmware.bin $CI_PROJECT_NAME/$platform/$device_id $CI_COMMIT_TAG.bin
-      exit 0
-      fi
-  only:
-    - tags
-    # - $SOME_VARIABLE
+# build_tag:
+#   stage: build
+#   image: registry.crudus.no/crudus-devices/platformio:latest
+#   script:
+#     - platformio run
+#     - |
+#       if [ ! -z "$device_id" ]; then
+#       upload .pioenvs/featheresp32/firmware.bin $CI_PROJECT_NAME/$platform/$device_id $CI_COMMIT_TAG.bin
+#       exit 0
+#       fi
+#   only:
+#     - tags
+#     # - $SOME_VARIABLE
