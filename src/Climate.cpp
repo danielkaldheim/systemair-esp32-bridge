@@ -397,18 +397,3 @@ void Climate::getRotorState()
     }
     digitalWrite(ORANGE_LED, HIGH);
 }
-/*
-def update_fan_rpm(self):
-if not savecair:
-req.modbusregisters(110,2)
-self.sf_rpm,self.ef_rpm=req.response[0],req.response[1]
-try:
-    if self.system_name in ("VR400"):
-        self.electric_power= (self.ef_rpm/(100/(float(float(self.ef_rpm)/1381)**1.89))+self.sf_rpm/(100/(float(float(self.sf_rpm)/1381)**1.89)))
-    if self.system_name in ("VSR300"):
-        self.electric_power=0.2 *  (self.ef_rpm/(100/(float(float(self.ef_rpm)/1381)**1.89))+self.sf_rpm/(100/(float(float(self.sf_rpm)/1381)**1.89)))
-
-except ZeroDivisionError:self.electric_power=0
-if "Yes" in self.rotor_active :self.electric_power +=10 # rotor motor 10Watts
-self.electric_power+=5#controller power
-*/
