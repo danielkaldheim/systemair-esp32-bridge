@@ -5,12 +5,14 @@
 #include "Sense.h"
 Sense sense;
 
-#include <bluetooth/SenseBLE.h>
+// #include <bluetooth/SenseBLE.h>
 #include <SenseWifi.h>
 #include <WiFi.h>
-#include <ModbusMaster.h>
 #include <PubSubClient.h>
 #include "time.h"
+
+#include "Climate.h"
+#include "WeatherForcast.h"
 
 bool ready = false;
 bool WiFiReady = false;
@@ -24,24 +26,27 @@ String MQTTHostString;
 uint16_t MQTTPortInt;
 
 boolean MQTTReconnect();
-void callback(char *topic, byte *payload, unsigned int length);
 void senseWiFiEvent(WiFiEvent_t event);
 
 void uptime();
-void printLocalTime();
 void publishDiscovery();
 void setSubscribeTopics();
 
 void callback(char *topic, byte *payload, unsigned int length);     // MQTT Subscribe callback
 void sensorPayloadCallback(const char *topic, const char *payload); // Sensor Payload callback
 
-SenseBLE senseBLE;
+// SenseBLE senseBLE;
 SenseWifi senseWifi(senseWiFiEvent);
+Climate climate(sensorPayloadCallback);
 WiFiClient client;
 PubSubClient senseMQTT("", 1883, callback, client);
+WeatherForcast wf;
 
 // instantiate ModbusMaster object
 ModbusMaster node;
+
+unsigned long previousMillis = 0;
+const unsigned long interval = 60 * 1000;
 
 void senseWiFiEvent(WiFiEvent_t event)
 {
@@ -92,48 +97,31 @@ void setSubscribeTopics()
     senseMQTT.subscribe(modeTopic.c_str());
 }
 
-void setFan(String value)
-{
-    uint16_t target = 0;
-    if (value == "low")
-    {
-        target = 0x01;
-    }
-    else if (value == "medium")
-    {
-        target = 0x02;
-    }
-    else if (value == "high")
-    {
-        target = 0x03;
-    }
-    node.writeSingleRegister(0x64, target);
-}
-/*
-def get_rotor_state(self):
-if not savecair:
-req.modbusregister(206,0)
-    self.exchanger_mode= req.response
-req.modbusregisters(350,2)
-        self.rotor_state = req.response[0]
-        if req.response[1]:
-    self.rotor_active = "Yes"
-    self.exchanger_speed= 100
-        else: self.rotor_active = "No"
-*/
-
 void callback(char *topic, byte *payload, unsigned int length)
 {
-    String fanTopic = MQTTTopicString + "fan/set";
     String stringTopic = topic;
     String value;
     for (int i = 0; i < length; i++)
     {
         value += (char)payload[i];
     }
+
+    String fanTopic = MQTTTopicString + "fan/set";
     if (stringTopic == fanTopic)
     {
-        setFan(value);
+        climate.setFanSpeedString(value);
+    }
+
+    String temperatureTopic = MQTTTopicString + "temperature/set";
+    if (stringTopic == temperatureTopic)
+    {
+        climate.setTargetTemperature(value.toDouble());
+    }
+
+    String modeTopic = MQTTTopicString + "mode/set";
+    if (stringTopic == modeTopic)
+    {
+        climate.setModeState(value);
     }
 }
 
@@ -149,16 +137,18 @@ void sensorPayloadCallback(const char *topic, const char *payload)
 
 void preTransmission()
 {
-    digitalWrite(MAX485_RE_NEG, 1);
-    digitalWrite(MAX485_DE, 1);
+    digitalWrite(BUILTIN_LED, LOW);
+    digitalWrite(MAX485_RE_NEG, HIGH);
+    digitalWrite(MAX485_DE, HIGH);
 }
 
 void postTransmission()
 {
     // https://github.com/4-20ma/ModbusMaster/issues/93
     delay(2); //DE is pulled down too quiclky on ESP8266 and cuts off the Modbus message in the CRC
-    digitalWrite(MAX485_RE_NEG, 0);
-    digitalWrite(MAX485_DE, 0);
+    digitalWrite(MAX485_RE_NEG, LOW);
+    digitalWrite(MAX485_DE, LOW);
+    digitalWrite(BUILTIN_LED, HIGH);
 }
 
 void setup()
@@ -176,7 +166,7 @@ void setup()
 
     sense.begin();
 
-    senseBLE.begin();
+    // senseBLE.begin();
     senseWifi.begin();
 
     deviceName = Sense::getDeviceName();
@@ -192,6 +182,7 @@ void setup()
     // Callbacks allow us to configure the RS485 transceiver correctly
     node.preTransmission(preTransmission);
     node.postTransmission(postTransmission);
+    climate.begin(node);
 }
 
 void publishDiscovery()
@@ -232,158 +223,6 @@ void publishDiscovery()
     }
 }
 
-void publishState()
-{
-    digitalWrite(ORANGE_LED, LOW);
-    uint8_t result;
-    result = node.readInputRegisters(0xD5, 5);
-    if (result == node.ku8MBSuccess)
-    {
-        StaticJsonDocument<92> doc;
-
-        doc["mode"] = "heat";
-        doc["target_temp"] = 23.0f;
-        doc["current_temp"] = (double)node.getResponseBuffer(0x01) / 10.0;
-
-        String payload;
-        serializeJson(doc, payload);
-        doc.clear();
-
-        sensorPayloadCallback("state", payload.c_str());
-    }
-    digitalWrite(ORANGE_LED, HIGH);
-}
-
-void getSystemName()
-{
-    digitalWrite(ORANGE_LED, LOW);
-    uint8_t result;
-    result = node.readInputRegisters(0x1F4, 1);
-    if (result == node.ku8MBSuccess)
-    {
-        StaticJsonDocument<92> doc;
-
-        doc["name"] = node.getResponseBuffer(0x00);
-
-        String payload;
-        serializeJson(doc, payload);
-        doc.clear();
-
-        sensorPayloadCallback("system", payload.c_str());
-    }
-    digitalWrite(ORANGE_LED, HIGH);
-}
-
-void getHeater()
-{
-    digitalWrite(ORANGE_LED, LOW);
-    uint8_t result;
-    result = node.readInputRegisters(0xC8, 1);
-    if (result == node.ku8MBSuccess)
-    {
-        StaticJsonDocument<92> doc;
-
-        doc["heater"] = node.getResponseBuffer(0x00);
-
-        String payload;
-        serializeJson(doc, payload);
-        doc.clear();
-
-        sensorPayloadCallback("heater", payload.c_str());
-    }
-    digitalWrite(ORANGE_LED, HIGH);
-}
-
-void getFanspeed()
-{
-    digitalWrite(ORANGE_LED, LOW);
-    uint8_t result;
-    result = node.readInputRegisters(0x64, 1);
-    if (result == node.ku8MBSuccess)
-    {
-        String speed = "off";
-
-        switch (node.getResponseBuffer(0x00))
-        {
-        case 0:
-            speed = "off";
-            break;
-        case 1:
-            speed = "low";
-            break;
-        case 2:
-            speed = "medium";
-            break;
-        case 3:
-            speed = "high";
-            break;
-
-        default:
-            break;
-        }
-
-        sensorPayloadCallback("fan/state", speed.c_str());
-    }
-    digitalWrite(ORANGE_LED, HIGH);
-}
-
-void getTemperatures()
-{
-    digitalWrite(ORANGE_LED, LOW);
-    uint8_t result;
-    result = node.readInputRegisters(0xD5, 5);
-    if (result == node.ku8MBSuccess)
-    {
-        StaticJsonDocument<92> doc;
-
-        doc["pre-supply"] = (double)node.getResponseBuffer(0x00) / 10.0;
-        doc["extract"] = (double)node.getResponseBuffer(0x01) / 10.0;
-        doc["exhaust"] = (double)node.getResponseBuffer(0x02) / 10.0;
-        doc["supply"] = (double)node.getResponseBuffer(0x03) / 10.0;
-        doc["inlet"] = (double)node.getResponseBuffer(0x04) / 10.0;
-
-        String payload;
-        serializeJson(doc, payload);
-        doc.clear();
-
-        sensorPayloadCallback("temperature/state", payload.c_str());
-    }
-    digitalWrite(ORANGE_LED, HIGH);
-}
-
-void getFanSpeedLevel()
-{
-    digitalWrite(ORANGE_LED, LOW);
-    uint8_t result;
-    result = node.readInputRegisters(0x65, 6);
-    if (result == node.ku8MBSuccess)
-    {
-        StaticJsonDocument<92> doc;
-
-        doc["sf1"] = node.getResponseBuffer(0x00);
-        doc["sf2"] = node.getResponseBuffer(0x01);
-        doc["sf3"] = node.getResponseBuffer(0x02);
-        doc["ef1"] = node.getResponseBuffer(0x03);
-        doc["ef2"] = node.getResponseBuffer(0x04);
-        doc["ef3"] = node.getResponseBuffer(0x05);
-
-        String payload;
-        serializeJson(doc, payload);
-        doc.clear();
-
-        sensorPayloadCallback("fanspeedLevel", payload.c_str());
-    }
-    digitalWrite(ORANGE_LED, HIGH);
-}
-
-void getModeState()
-{
-    digitalWrite(ORANGE_LED, LOW);
-    String mode = "fan_only";
-    sensorPayloadCallback("mode/state", mode.c_str());
-    digitalWrite(ORANGE_LED, HIGH);
-}
-
 void uptime()
 {
     StaticJsonDocument<120> doc;
@@ -396,8 +235,6 @@ void uptime()
     String payload;
     serializeJson(doc, payload);
     sensorPayloadCallback("uptime", payload.c_str());
-
-    getSystemName();
 }
 
 void loop()
@@ -420,25 +257,28 @@ void loop()
                 }
             }
         }
+        wf.loop();
     }
 
-    senseBLE.loop();
+    // senseBLE.loop();
 
     if (!ready)
     {
         // Data is read and ready to send
         ready = true;
         publishDiscovery();
+        // uint16_t test1 = 15;
+        // uint16_t test = test1 << 0;
+
+        // Serial.println(test);
     }
 
-    getModeState();
-    delay(500);
-    getFanspeed();
-    delay(500);
-    getTemperatures();
-    delay(500);
-    getHeater();
-    // getFanSpeedLevel();
+    climate.loop();
 
-    delay(1000);
+    unsigned long currentMillis = millis();
+    if (currentMillis - previousMillis >= interval)
+    {
+        previousMillis += interval;
+        uptime();
+    }
 }

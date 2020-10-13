@@ -8,10 +8,14 @@
 #ifndef READING_FREQUENCY
 #define READING_FREQUENCY UINT32_C(1 * 60 * 1000)
 #endif
-// #define ASYNC_TCP_SSL_ENABLED true
-// #define MQTT_MAX_PACKET_SIZE 256
+
+#ifndef MQTT_KEEPALIVE
 #define MQTT_KEEPALIVE 30
+#endif
+
+#ifndef MQTTled
 #define MQTTled 0
+#endif
 
 #ifdef COMP_OLED
 #define SCREEN_WIDTH 128 // OLED display width, in pixels

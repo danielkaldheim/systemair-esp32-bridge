@@ -30,15 +30,16 @@ climate:
     unique_id: "SystemAir-68E6"
     modes:
       - "off"
+      - "auto"
       - "heat"
       - "fan_only"
     mode_command_topic: systemair/68E6/mode/set
     mode_state_topic: systemair/68E6/mode/state
     fan_modes:
-      - "off"
-      - "low"
-      - "medium"
-      - "high"
+      - "Off"
+      - "Low"
+      - "Normal"
+      - "High"
     fan_mode_state_topic: systemair/68E6/fan/state
     fan_mode_command_topic: systemair/68E6/fan/set
     current_temperature_template: "{{ value_json.extract }}"
