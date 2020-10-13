@@ -1,0 +1,18 @@
+{
+  "name": "esp32-weather-service",
+  "version": "1.0.0",
+  "description": "ESP32 Weather Service for SystemAir Bridge",
+  "main": "index.js",
+  "author": "Daniel Rufus Kaldheim <daniel@kaldheim.org>",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.17.1",
+    "node-cache": "^5.1.2",
+    "request": "^2.88.2",
+    "request-promise": "^4.2.6"
+  }
+}

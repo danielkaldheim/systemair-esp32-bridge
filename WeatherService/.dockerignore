@@ -1,0 +1,5 @@
+.editorconfig
+.prettierrc
+node_modules
+deployment.yaml
+Dockerfile
