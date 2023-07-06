@@ -30,6 +30,21 @@ static const char *SystemNames[] = {
     "VTC200",
     "VTC100"};
 
+static const char *UserModes[] = {
+    "Auto",
+    "Manuell",
+    "Gjester",
+    "Refresh",
+    "Peis",
+    "Borte",
+    "Ferie",
+    "Cooker hood",
+    "Vacuum cleaner",
+    "CD1",
+    "CD2",
+    "CD3",
+    "Pressure guard"};
+
 static const char *RotorStates[] = {
     "Normal",
     "Rotor Fault",
@@ -45,11 +60,12 @@ static const char *RotorStates[] = {
     "Rotor Fault, but conditions normal"};
 
 static const char *FanSpeeds[] = {
-    "Off",
-    "Low",
+    "undefined",
+    "Av",
+    "Lav",
     "Normal",
-    "High",
-    "undefined"};
+    "Høy",
+};
 
 static const char *Modes[] = {
     "off",
@@ -69,7 +85,7 @@ public:
 
     void getAirflow();
     void getFanSpeed();
-    void setTargetTemperature(double value);
+    boolean setTargetTemperature(uint16_t value);
     void getTemperatures();
     void getModeState();
     void getSystemName();
@@ -78,6 +94,7 @@ public:
     void getRotorState();
 
     boolean setModeState(String value);
+    boolean setPresetState(String value);
     boolean setFanSpeed(uint16_t value);
     boolean setFanSpeedString(String value);
     boolean setHeater(uint16_t value);

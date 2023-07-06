@@ -14,12 +14,17 @@ Sense sense;
 #include "Climate.h"
 #include "WeatherForcast.h"
 
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <HTTPUpdate.h>
+
 bool ready = false;
 bool WiFiReady = false;
 long lastReconnectAttempt = 0;
 
 String deviceName = "SystemAir-ESP32";
-String MQTTTopicString = "systemair/vr400-esp32/";
+String chipId = "VTR300-esp32";
+String MQTTTopicString = "systemair/VTR300-esp32/";
 String MQTTUsernameString;
 String MQTTPwdString;
 String MQTTHostString;
@@ -40,7 +45,7 @@ SenseWifi senseWifi(senseWiFiEvent);
 Climate climate(sensorPayloadCallback);
 WiFiClient client;
 PubSubClient senseMQTT("", 1883, callback, client);
-WeatherForcast wf;
+// WeatherForcast wf;
 
 // instantiate ModbusMaster object
 ModbusMaster node;
@@ -74,6 +79,7 @@ boolean MQTTReconnect()
 {
     if (MQTTPwdString.length() > 0)
     {
+        senseMQTT.setBufferSize(1024);
         senseMQTT.setServer(MQTTHostString.c_str(), MQTTPortInt);
         senseMQTT.connect(deviceName.c_str(), MQTTUsernameString.c_str(), MQTTPwdString.c_str());
         if (senseMQTT.connect(deviceName.c_str(), MQTTUsernameString.c_str(), MQTTPwdString.c_str()))
@@ -91,10 +97,16 @@ void setSubscribeTopics()
     senseMQTT.setCallback(callback);
     String fanTopic = MQTTTopicString + "fan/set";
     senseMQTT.subscribe(fanTopic.c_str());
-    String tempTopic = MQTTTopicString + "temperature/set";
+    String tempTopic = MQTTTopicString + "temp/set";
     senseMQTT.subscribe(tempTopic.c_str());
     String modeTopic = MQTTTopicString + "mode/set";
     senseMQTT.subscribe(modeTopic.c_str());
+    String presetTopic = MQTTTopicString + "preset/set";
+    senseMQTT.subscribe(presetTopic.c_str());
+    String otaTopic = MQTTTopicString + "system/ota/set";
+    senseMQTT.subscribe(otaTopic.c_str());
+    String homeAssistantStatus = "homeassistant/status";
+    senseMQTT.subscribe(homeAssistantStatus.c_str());
 }
 
 void callback(char *topic, byte *payload, unsigned int length)
@@ -112,16 +124,75 @@ void callback(char *topic, byte *payload, unsigned int length)
         climate.setFanSpeedString(value);
     }
 
-    String temperatureTopic = MQTTTopicString + "temperature/set";
+    String temperatureTopic = MQTTTopicString + "temp/set";
     if (stringTopic == temperatureTopic)
     {
-        climate.setTargetTemperature(value.toDouble());
+        double target = value.toDouble();
+        int16_t targetInt = target * 10;
+        climate.setTargetTemperature(targetInt);
     }
 
     String modeTopic = MQTTTopicString + "mode/set";
     if (stringTopic == modeTopic)
     {
         climate.setModeState(value);
+    }
+
+    String presetTopic = MQTTTopicString + "preset/set";
+    if (stringTopic == presetTopic)
+    {
+        climate.setPresetState(value);
+    }
+
+    String otaTopic = MQTTTopicString + "system/ota/set";
+    if (stringTopic == otaTopic && value != "")
+    {
+        StaticJsonDocument<120> doc;
+        doc["state"] = "received";
+        doc["version"] = STR(VERSION);
+        doc["file"] = value;
+
+        String payload;
+        serializeJson(doc, payload);
+        sensorPayloadCallback("system/ota", payload.c_str());
+
+        setClock();
+        WiFiClientSecure client;
+        client.setCACert(OTA_ROOT_CA);
+
+        // Reading data over SSL may be slow, use an adequate timeout
+        client.setTimeout(12000 / 1000); // timeout argument is defined in seconds for setTimeout
+
+        t_httpUpdate_return ret = httpUpdate.update(client, "ha.dukkelunden.no", 443, value, STR(VERSION));
+
+        switch (ret)
+        {
+        case HTTP_UPDATE_FAILED:
+            doc["state"] = "failed";
+            doc["error"] = httpUpdate.getLastErrorString().c_str();
+            break;
+
+        case HTTP_UPDATE_NO_UPDATES:
+            doc["state"] = "failed";
+            doc["error"] = "no updates";
+            break;
+
+        case HTTP_UPDATE_OK:
+            doc["state"] = "ok";
+            break;
+        }
+        String payload2;
+        serializeJson(doc, payload2);
+        sensorPayloadCallback("system/ota", payload2.c_str());
+    }
+
+    String homeAssistantStatus = "homeassistant/status";
+    if (stringTopic == homeAssistantStatus)
+    {
+        if (value == "online")
+        {
+            publishDiscovery();
+        }
     }
 }
 
@@ -145,7 +216,7 @@ void preTransmission()
 void postTransmission()
 {
     // https://github.com/4-20ma/ModbusMaster/issues/93
-    delay(2); //DE is pulled down too quiclky on ESP8266 and cuts off the Modbus message in the CRC
+    delay(2); // DE is pulled down too quiclky on ESP8266 and cuts off the Modbus message in the CRC
     digitalWrite(MAX485_RE_NEG, LOW);
     digitalWrite(MAX485_DE, LOW);
     digitalWrite(BUILTIN_LED, HIGH);
@@ -170,6 +241,7 @@ void setup()
     senseWifi.begin();
 
     deviceName = Sense::getDeviceName();
+    chipId = Sense::getChipId();
     MQTTUsernameString = Sense::getMQTTUser();
     MQTTPwdString = Sense::getMQTTPwd();
     MQTTTopicString = Sense::getMQTTTopic();
@@ -178,48 +250,211 @@ void setup()
     delay(100);
 
     // Modbus slave ID 1
-    node.begin(1, Serial);
+    node.begin(2, Serial);
     // Callbacks allow us to configure the RS485 transceiver correctly
     node.preTransmission(preTransmission);
     node.postTransmission(postTransmission);
     climate.begin(node);
 }
 
+void publishDiscoveryClimate()
+{
+    DynamicJsonDocument doc(1024);
+
+    doc["name"] = "Ventilation";
+    doc["uniq_id"] = chipId.c_str();
+    doc["~"] = MQTTTopicString;
+
+    doc["dev"]["name"] = "Ventilation";
+    doc["dev"]["mdl"] = "Save VTR300/B";
+    doc["dev"]["mf"] = "SystemAir";
+    doc["dev"]["ids"][0] = chipId.c_str();
+    doc["dev"]["sw"] = STR(VERSION);
+
+    doc["target_temperature_low"] = 12;
+    doc["target_temperature_high"] = 30;
+
+    doc["pr_mode_cmd_t"] = "~preset/set";
+    doc["pr_mode_stat_t"] = "~mode/state";
+    doc["pr_mode_val_tpl"] = "{{ value_json.um }}";
+    doc["pr_modes"][0] = UserModes[0];
+    doc["pr_modes"][1] = UserModes[1];
+    doc["pr_modes"][2] = UserModes[2];
+    doc["pr_modes"][3] = UserModes[3];
+    doc["pr_modes"][4] = UserModes[4];
+    doc["pr_modes"][5] = UserModes[5];
+    doc["pr_modes"][6] = UserModes[6];
+    doc["pr_modes"][7] = UserModes[15];
+
+    doc["mode_cmd_t"] = "~mode/set";
+    doc["mode_stat_t"] = "~mode/state";
+    doc["mode_stat_tpl"] = "{{ value_json.m }}";
+    doc["modes"][0] = "off";
+    doc["modes"][1] = "auto";
+
+    doc["temp_cmd_t"] = "~temp/set";
+    doc["temp_stat_t"] = "~temp/state";
+    doc["temp_stat_tpl"] = "{{ value_json.sp_s }}";
+
+    doc["curr_temp_t"] = "~temp/state";
+    doc["curr_temp_tpl"] = "{{ value_json.sa }}";
+
+    doc["fan_mode_cmd_t"] = "~fan/set";
+    doc["fan_mode_stat_t"] = "~fan/state";
+    doc["fan_mode_stat_tpl"] = "{{ value_json.m }}";
+    doc["fan_modes"][0] = FanSpeeds[1];
+    doc["fan_modes"][1] = FanSpeeds[2];
+    doc["fan_modes"][2] = FanSpeeds[3];
+    doc["fan_modes"][3] = FanSpeeds[4];
+
+    String payload;
+    serializeJson(doc, payload);
+    doc.clear();
+
+    String topic = String("homeassistant/climate/" + chipId + "/config");
+
+    senseMQTT.publish(topic.c_str(), payload.c_str());
+}
+
+void publishDiscoveryFilter()
+{
+    String uniqId = String(chipId + "_filter_remaining").c_str();
+
+    DynamicJsonDocument doc(1024);
+
+    doc["name"] = "Ventilation filter remaining";
+    doc["uniq_id"] = uniqId;
+    doc["~"] = MQTTTopicString;
+
+    doc["dev"]["name"] = "Ventilation";
+    doc["dev"]["mdl"] = "Save VTR300/B";
+    doc["dev"]["mf"] = "SystemAir";
+    doc["dev"]["ids"][0] = chipId.c_str();
+    doc["dev"]["sw"] = STR(VERSION);
+
+    doc["stat_t"] = "~filter/state";
+    doc["json_attr_t"] = "~filter/state";
+    doc["val_tpl"] = "{{ value_json.p }}";
+    doc["unit_of_meas"] = "%";
+    doc["ic"] = "mdi:air-filter";
+
+    String payload;
+    serializeJson(doc, payload);
+    doc.clear();
+
+    String topic = String("homeassistant/sensor/" + uniqId + "/config");
+
+    senseMQTT.publish(topic.c_str(), payload.c_str());
+}
+
+void publishDiscoveryOutdoorTemp()
+{
+    String uniqId = String(chipId + "_outdoor_temp").c_str();
+
+    DynamicJsonDocument doc(1024);
+
+    doc["name"] = "Ventilation outdoor temperature";
+    doc["uniq_id"] = uniqId;
+    doc["~"] = MQTTTopicString;
+
+    doc["dev"]["name"] = "Ventilation";
+    doc["dev"]["mdl"] = "Save VTR300/B";
+    doc["dev"]["mf"] = "SystemAir";
+    doc["dev"]["ids"][0] = chipId.c_str();
+    doc["dev"]["sw"] = STR(VERSION);
+
+    doc["stat_t"] = "~temp/state";
+    doc["json_attr_t"] = "~temp/state";
+    doc["val_tpl"] = "{{ value_json.oa | float }}";
+    doc["dev_cla"] = "temperature";
+    doc["unit_of_meas"] = "°C";
+    doc["stat_cla"] = "measurement";
+
+    String payload;
+    serializeJson(doc, payload);
+    doc.clear();
+
+    String topic = String("homeassistant/sensor/" + uniqId + "/config");
+
+    senseMQTT.publish(topic.c_str(), payload.c_str());
+}
+
+void publishDiscoverySupplyTemp()
+{
+    String uniqId = String(chipId + "_supply_temp").c_str();
+
+    DynamicJsonDocument doc(1024);
+
+    doc["name"] = "Ventilation supply air temperature";
+    doc["uniq_id"] = uniqId;
+    doc["~"] = MQTTTopicString;
+
+    doc["dev"]["name"] = "Ventilation";
+    doc["dev"]["mdl"] = "Save VTR300/B";
+    doc["dev"]["mf"] = "SystemAir";
+    doc["dev"]["ids"][0] = chipId.c_str();
+    doc["dev"]["sw"] = STR(VERSION);
+
+    doc["stat_t"] = "~temp/state";
+    doc["json_attr_t"] = "~temp/state";
+    doc["val_tpl"] = "{{ value_json.sa }}";
+    doc["dev_cla"] = "temperature";
+    doc["unit_of_meas"] = "°C";
+    doc["stat_cla"] = "measurement";
+
+    String payload;
+    serializeJson(doc, payload);
+    doc.clear();
+
+    String topic = String("homeassistant/sensor/" + uniqId + "/config");
+
+    senseMQTT.publish(topic.c_str(), payload.c_str());
+}
+
+void publishDiscoveryOutputSATC()
+{
+    String uniqId = String(chipId + "_output_satc").c_str();
+
+    DynamicJsonDocument doc(1024);
+
+    doc["name"] = "Ventilation output satc";
+    doc["uniq_id"] = uniqId;
+    doc["~"] = MQTTTopicString;
+
+    doc["dev"]["name"] = "Ventilation";
+    doc["dev"]["mdl"] = "Save VTR300/B";
+    doc["dev"]["mf"] = "SystemAir";
+    doc["dev"]["ids"][0] = chipId.c_str();
+    doc["dev"]["sw"] = STR(VERSION);
+
+    doc["stat_t"] = "~temp/state";
+    doc["json_attr_t"] = "~temp/state";
+    doc["val_tpl"] = "{{ value_json.o_s | float }}";
+    doc["unit_of_meas"] = "%";
+    doc["stat_cla"] = "measurement";
+
+    String payload;
+    serializeJson(doc, payload);
+    doc.clear();
+
+    String topic = String("homeassistant/sensor/" + uniqId + "/config");
+
+    senseMQTT.publish(topic.c_str(), payload.c_str());
+}
+
 void publishDiscovery()
 {
     if (senseWifi.connected() && senseMQTT.connected())
     {
-        // String stateTopic = MQTTTopicString;
-        // stateTopic += "state";
-
-        // String tempCmd = MQTTTopicString;
-        // tempCmd += "targetTempCmd";
-
-        StaticJsonDocument<300> doc;
-
-        doc["name"] = "VR400";
-        doc["unique_id"] = deviceName.c_str();
-        // doc["mode_cmd_t"] = "homeassistant/climate/livingroom/thermostatModeCmd";
-        // doc["mode_stat_t"] = "homeassistant/climate/livingroom/state";
-        // doc["mode_stat_tpl"] = "";
-        // doc["avty_t"] = "homeassistant/climate/livingroom/available";
-        // doc["pl_avail"] = "online";
-        // doc["pl_not_avail"] = "offline";
-        // doc["temp_cmd_t"] = tempCmd.c_str();
-        // doc["temp_stat_t"] = stateTopic.c_str();
-        // doc["temp_stat_tpl"] = "";
-        // doc["curr_temp_t"] = stateTopic.c_str();
-        // doc["curr_temp_tpl"] = "";
-        // doc["min_temp"] = "10";
-        // doc["max_temp"] = "30";
-        // doc["temp_step"] = "1";
-        // doc["modes"] =  ["off", "heat"]
-
-        String payload;
-        serializeJson(doc, payload);
-        doc.clear();
-
-        senseMQTT.publish("homeassistant/climate/VR400/config", payload.c_str());
+        publishDiscoveryClimate();
+        delay(100);
+        publishDiscoveryFilter();
+        delay(100);
+        publishDiscoveryOutdoorTemp();
+        delay(100);
+        publishDiscoverySupplyTemp();
+        delay(100);
+        publishDiscoveryOutputSATC();
     }
 }
 
@@ -257,7 +492,7 @@ void loop()
                 }
             }
         }
-        wf.loop();
+        // wf.loop();
     }
 
     // senseBLE.loop();

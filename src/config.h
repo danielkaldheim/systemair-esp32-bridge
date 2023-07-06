@@ -1,3 +1,5 @@
+#define COMPONENTS_SENSE_BLE_H_
+
 #ifndef ORANGE_LED
 #define ORANGE_LED 21
 #endif
@@ -15,6 +17,10 @@
 
 #ifndef MQTTled
 #define MQTTled 0
+#endif
+
+#ifndef DEBUG
+#define DEBUG true
 #endif
 
 #ifdef COMP_OLED
